@@ -2143,7 +2143,7 @@ class BaseModelResource(Resource):
                 if hasattr(django_field, 'field'):
                     django_field = django_field.field  # related field
             except FieldDoesNotExist:
-                raise InvalidFilterError("The '%s' field is not a valid field name" % field_name)
+                raise InvalidFilterError("The '%s' field is not a valid field name for %s" % field_name, self._meta.object_class.__name__)
 
             query_terms = django_field.get_lookups().keys()
             if len(filter_bits) and filter_bits[-1] in query_terms:
