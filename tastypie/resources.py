@@ -1296,10 +1296,29 @@ class Resource(metaclass=DeclarativeMetaclass):
         Mostly a useful shortcut/hook.
         """
         desired_format = self.determine_format(request)
-        serialized = self.serialize(request, data, desired_format)
+
+        response_data = data
+
+        min_version = getattr(settings, 'TASTYPIE_NEW_FORMAT_BACKEND_VERSION', None)
+        if min_version and get_backend_version(request) >= min_version:
+            response_data = {
+                "success": True,
+                "warnings": {},
+                "meta": {},
+                "errors": None,
+            }
+            if isinstance(data, dict):
+                response_data["data"] = data.get('objects', {})
+                response_data["meta"] = data.get('meta', {})
+            elif isinstance(data, Bundle):
+                response_data["data"] = data.data
+            else:
+                response_data["data"] = data
+
+        serialized = self.serialize(request, response_data, desired_format)
         return response_class(content=serialized, content_type=build_content_type(desired_format), **response_kwargs)
 
-    def error_response(self, request, errors, response_class=None):
+    def original_error_response(self, request, errors, response_class=None):
         """
         Extracts the common "which-format/serialize/return-error-response"
         cycle.
@@ -1335,6 +1354,48 @@ class Resource(metaclass=DeclarativeMetaclass):
             return response_class(content=error, content_type='text/plain')
 
         return response_class(content=serialized, content_type=build_content_type(desired_format))
+
+    def api_error_response(self, request, errors, response_class=None):
+        """
+        Extracts the common "which-format/serialize/return-error-response"
+        cycle.
+
+        Should be used as much as possible to return errors.
+        """
+        if response_class is None or response_class == http.HttpBadRequest:
+            response_class = http.HttpResponse
+
+        desired_format = None
+
+        if request:
+            if request.GET.get('callback', None) is None:
+                try:
+                    desired_format = self.determine_format(request)
+                except BadRequest:
+                    pass  # Fall through to default handler below
+            else:
+                # JSONP can cause extra breakage.
+                desired_format = 'application/json'
+
+        if not desired_format:
+            desired_format = self._meta.default_format
+
+        response_data = {
+            "success": False,
+            "data": {},
+            "warnings": {},
+            "meta": {},
+            "errors": errors,
+        }
+        serialized = self.serialize(request, response_data, desired_format)
+        return response_class(content=serialized, content_type=build_content_type(desired_format))
+
+    def error_response(self, request, errors, response_class=None):
+        min_version = getattr(settings, 'TASTYPIE_NEW_FORMAT_BACKEND_VERSION', None)
+        if min_version and get_backend_version(request) >= min_version:
+            return self.api_error_response(request, errors, response_class)
+        else:
+            return self.original_error_response(request, errors, response_class)
 
     def is_valid(self, bundle):
         """
@@ -1708,8 +1769,9 @@ class Resource(metaclass=DeclarativeMetaclass):
                 bundle = self.build_bundle(obj=obj, request=request)
                 self.obj_delete(bundle=bundle)
 
-        if self._meta.always_return_data and get_backend_version(request) > 2:
-            # modified to not return results for old versions
+        if not self._meta.always_return_data:
+            return http.HttpAccepted()
+        else:
             to_be_serialized = {
                 'objects': [
                     self.full_dehydrate(b, for_list=True)
@@ -1718,8 +1780,6 @@ class Resource(metaclass=DeclarativeMetaclass):
             }
             to_be_serialized = self.alter_list_data_to_serialize(request, to_be_serialized)
             return self.create_response(request, to_be_serialized, response_class=http.HttpAccepted)
-        else:
-            return http.HttpAccepted()
 
     def patch_detail(self, request, **kwargs):
         """
@@ -2143,7 +2203,8 @@ class BaseModelResource(Resource):
                 if hasattr(django_field, 'field'):
                     django_field = django_field.field  # related field
             except FieldDoesNotExist:
-                raise InvalidFilterError("The '%s' field is not a valid field name for %s" % field_name, self._meta.object_class.__name__)
+                raise InvalidFilterError("The '%s' field is not a valid field name for %s" % field_name,
+                                         self._meta.object_class.__name__)
 
             query_terms = django_field.get_lookups().keys()
             if len(filter_bits) and filter_bits[-1] in query_terms:
