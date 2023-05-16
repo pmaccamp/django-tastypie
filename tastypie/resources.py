@@ -1298,9 +1298,12 @@ class Resource(metaclass=DeclarativeMetaclass):
         desired_format = self.determine_format(request)
 
         response_data = data
+        headers = response_kwargs.pop('headers', {})
 
         min_version = getattr(settings, 'TASTYPIE_NEW_FORMAT_BACKEND_VERSION', None)
         if min_version and get_backend_version(request) >= min_version:
+            headers["Api-Response-Version"] = getattr(settings, 'TASTYPIE_RESPONSE_VERSION', "2023-05-10")
+
             response_data = {
                 "success": True,
                 "warnings": {},
@@ -1316,7 +1319,8 @@ class Resource(metaclass=DeclarativeMetaclass):
                 response_data["data"] = data
 
         serialized = self.serialize(request, response_data, desired_format)
-        return response_class(content=serialized, content_type=build_content_type(desired_format), **response_kwargs)
+        return response_class(content=serialized, content_type=build_content_type(desired_format),
+                              headers=headers, **response_kwargs)
 
     def original_error_response(self, request, errors, response_class=None):
         """
@@ -1366,6 +1370,7 @@ class Resource(metaclass=DeclarativeMetaclass):
             response_class = http.HttpResponse
 
         desired_format = None
+        headers = {"Api-Response-Version": getattr(settings, 'TASTYPIE_RESPONSE_VERSION', "2023-05-10")}
 
         if request:
             if request.GET.get('callback', None) is None:
@@ -1388,7 +1393,7 @@ class Resource(metaclass=DeclarativeMetaclass):
             "errors": errors,
         }
         serialized = self.serialize(request, response_data, desired_format)
-        return response_class(content=serialized, content_type=build_content_type(desired_format))
+        return response_class(content=serialized, content_type=build_content_type(desired_format), headers=headers)
 
     def error_response(self, request, errors, response_class=None):
         min_version = getattr(settings, 'TASTYPIE_NEW_FORMAT_BACKEND_VERSION', None)
