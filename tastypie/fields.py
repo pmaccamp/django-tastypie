@@ -615,8 +615,7 @@ class RelatedField(ApiField):
         Given a URI is provided, the related resource is attempted to be
         loaded based on the identifiers in the URI.
         """
-        err_msg = "Could not find the provided %s object via resource URI '%s'." % (
-            fk_resource._meta.resource_name, uri,)
+        err_msg = f"Could not find the provided {fk_resource._meta.resource_name}"
 
         if not uri:
             raise ApiFieldError(err_msg)
@@ -641,12 +640,11 @@ class RelatedField(ApiField):
         obj = None
         if getattr(fk_resource._meta, 'include_resource_uri', True) and 'resource_uri' in data:
             uri = data['resource_uri']
-            err_msg = "Could not find the provided %s object via resource URI '%s'." % (
-                fk_resource._meta.resource_name, uri,)
+
             try:
                 obj = fk_resource.get_via_uri(uri, request=request)
             except ObjectDoesNotExist:
-                raise ApiFieldError(err_msg)
+                raise ApiFieldError(f"Could not find the provided {fk_resource._meta.resource_name}")
 
         fk_bundle = fk_resource.build_bundle(
             data=data,
