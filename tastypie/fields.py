@@ -1,6 +1,4 @@
 import datetime
-
-import pytz as pytz
 from dateutil.parser import parse
 import decimal
 from decimal import Decimal
@@ -8,15 +6,13 @@ import importlib
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.db import models
-from django.utils.timezone import get_current_timezone
-
 try:
     from django.db.models.fields.related import \
         SingleRelatedObjectDescriptor as ReverseOneToOneDescriptor
 except ImportError:
     from django.db.models.fields.related_descriptors import \
         ReverseOneToOneDescriptor
-from django.utils import datetime_safe, encoding
+from django.utils import datetime_safe
 
 from tastypie.bundle import Bundle
 from tastypie.exceptions import ApiFieldError, NotFound
@@ -220,8 +216,7 @@ class CharField(ApiField):
         if value is None:
             return None
 
-        # modified to avoid errors due to unicode characters
-        return encoding.force_text(value)
+        return str(value)
 
 
 class FileField(ApiField):
@@ -365,11 +360,6 @@ class DateField(ApiField):
                 year, month, day = value[:10].split('-')
 
                 return datetime_safe.date(int(year), int(month), int(day))
-            except pytz.AmbiguousTimeError:
-                # modified to default to server's timezone if not specified
-                value = get_current_timezone().localize(parse(value))
-                if hasattr(value, 'hour'):
-                    value = value.date()
             except ValueError:
                 raise ApiFieldError("Date provided to '%s' field doesn't appear to be a valid date string: '%s'" % (
                     self.instance_name, value))
@@ -424,9 +414,6 @@ class DateTimeField(ApiField):
                 try:
                     # Try to rip a date/datetime out of it.
                     value = make_aware(parse(value))
-                except pytz.AmbiguousTimeError:
-                    # modified to default to server's timezone if not specified
-                    value = get_current_timezone().localize(parse(value))
                 except (ValueError, TypeError):
                     raise ApiFieldError(
                         "Datetime provided to '%s' field doesn't appear to be a valid datetime string: '%s'" % (
