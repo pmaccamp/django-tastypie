@@ -1,4 +1,6 @@
 import datetime
+
+import pytz as pytz
 from dateutil.parser import parse
 import decimal
 from decimal import Decimal
@@ -6,13 +8,15 @@ import importlib
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.db import models
+from django.utils.timezone import get_current_timezone
+
 try:
-    from django.db.models.fields.related import\
+    from django.db.models.fields.related import \
         SingleRelatedObjectDescriptor as ReverseOneToOneDescriptor
 except ImportError:
-    from django.db.models.fields.related_descriptors import\
+    from django.db.models.fields.related_descriptors import \
         ReverseOneToOneDescriptor
-from django.utils import datetime_safe
+from django.utils import datetime_safe, encoding
 
 from tastypie.bundle import Bundle
 from tastypie.exceptions import ApiFieldError, NotFound
@@ -33,7 +37,8 @@ class ApiField(object):
     dehydrated_type = 'string'
     help_text = ''
 
-    def __init__(self, attribute=None, default=NOT_PROVIDED, null=False, blank=False, readonly=False, unique=False, help_text=None, use_in='all', verbose_name=None):
+    def __init__(self, attribute=None, default=NOT_PROVIDED, null=False, blank=False, readonly=False, unique=False,
+                 help_text=None, use_in='all', verbose_name=None):
         """
         Sets up the field. This is generally called when the containing
         ``Resource`` is initialized.
@@ -136,7 +141,9 @@ class ApiField(object):
                         # accesses will fail miserably.
                         break
                     else:
-                        raise ApiFieldError("The object '%r' has an empty attribute '%s' and doesn't allow a default or null value." % (previous_object, attr))
+                        raise ApiFieldError(
+                            "The object '%r' has an empty attribute '%s' and doesn't allow a default or null value." % (
+                                previous_object, attr))
 
             if callable(current_object):
                 current_object = current_object()
@@ -194,7 +201,8 @@ class ApiField(object):
             if self.null:
                 return None
 
-            raise ApiFieldError("The '%s' field has no data and doesn't allow a default or null value." % self.instance_name)
+            raise ApiFieldError(
+                "The '%s' field has no data and doesn't allow a default or null value." % self.instance_name)
 
         return bundle.data[self.instance_name]
 
@@ -212,7 +220,8 @@ class CharField(ApiField):
         if value is None:
             return None
 
-        return str(value)
+        # modified to avoid errors due to unicode characters
+        return encoding.force_text(value)
 
 
 class FileField(ApiField):
@@ -229,9 +238,13 @@ class FileField(ApiField):
             return None
 
         try:
-            # Try to return the URL if it's a ``File``, falling back to the string
-            # itself if it's been overridden or is a default.
-            return getattr(value, 'url', value)
+            val = getattr(value, 'url', value)
+            name = getattr(value, 'name', value)
+
+            # modified as some change in django 3.2 was prepending / which caused issues
+            if val.startswith('/') and not name.startswith('/'):
+                val = val[1:]
+            return val
         except ValueError:
             return None
 
@@ -352,8 +365,14 @@ class DateField(ApiField):
                 year, month, day = value[:10].split('-')
 
                 return datetime_safe.date(int(year), int(month), int(day))
+            except pytz.AmbiguousTimeError:
+                # modified to default to server's timezone if not specified
+                value = get_current_timezone().localize(parse(value))
+                if hasattr(value, 'hour'):
+                    value = value.date()
             except ValueError:
-                raise ApiFieldError("Date provided to '%s' field doesn't appear to be a valid date string: '%s'" % (self.instance_name, value))
+                raise ApiFieldError("Date provided to '%s' field doesn't appear to be a valid date string: '%s'" % (
+                    self.instance_name, value))
 
         return value
 
@@ -389,25 +408,32 @@ class DateTimeField(ApiField):
                 year, month, day = value[:10].split('-')
                 hour, minute, second = value[11:19].split(':')
 
-                return make_aware(datetime_safe.datetime(int(year), int(month), int(day), int(hour), int(minute), int(second)))
+                return make_aware(
+                    datetime_safe.datetime(int(year), int(month), int(day), int(hour), int(minute), int(second)))
             except ValueError:
-                raise ApiFieldError("Datetime provided to '%s' field doesn't appear to be a valid datetime string: '%s'" % (self.instance_name, value))
+                raise ApiFieldError(
+                    "Datetime provided to '%s' field doesn't appear to be a valid datetime string: '%s'" % (
+                        self.instance_name, value))
 
         return value
 
     def hydrate(self, bundle):
         value = super(DateTimeField, self).hydrate(bundle)
-
         if value and not hasattr(value, 'year'):
             if isinstance(value, str):
                 try:
                     # Try to rip a date/datetime out of it.
                     value = make_aware(parse(value))
+                except pytz.AmbiguousTimeError:
+                    # modified to default to server's timezone if not specified
+                    value = get_current_timezone().localize(parse(value))
                 except (ValueError, TypeError):
-                    raise ApiFieldError("Datetime provided to '%s' field doesn't appear to be a valid datetime string: '%s'" % (self.instance_name, value))
-
+                    raise ApiFieldError(
+                        "Datetime provided to '%s' field doesn't appear to be a valid datetime string: '%s'" % (
+                            self.instance_name, value))
             else:
-                raise ApiFieldError("Datetime provided to '%s' field must be a string: %s" % (self.instance_name, value))
+                raise ApiFieldError(
+                    "Datetime provided to '%s' field must be a string: %s" % (self.instance_name, value))
 
         return value
 
@@ -432,7 +458,9 @@ class RelatedField(ApiField):
     is_related = True
     help_text = 'A related resource. Can be either a URI or set of nested resource data.'
 
-    def __init__(self, to, attribute, related_name=None, default=NOT_PROVIDED, null=False, blank=False, readonly=False, full=False, unique=False, help_text=None, use_in='all', verbose_name=None, full_list=True, full_detail=True):
+    def __init__(self, to, attribute, related_name=None, default=NOT_PROVIDED, null=False, blank=False, readonly=False,
+                 full=False, unique=False, help_text=None, use_in='all', verbose_name=None, full_list=True,
+                 full_detail=True):
 
         """
         Builds the field and prepares it to access to related data.
@@ -492,7 +520,9 @@ class RelatedField(ApiField):
         bundle and returns ``True`` or ``False``.Depends on ``full``
         being ``True``. Defaults to ``True``.
         """
-        super(RelatedField, self).__init__(attribute=attribute, default=default, null=null, blank=blank, readonly=readonly, unique=unique, help_text=help_text, use_in=use_in, verbose_name=verbose_name)
+        super(RelatedField, self).__init__(attribute=attribute, default=default, null=null, blank=blank,
+                                           readonly=readonly, unique=unique, help_text=help_text, use_in=use_in,
+                                           verbose_name=verbose_name)
         self.related_name = related_name
         self.to = to
         self._to_class = None
@@ -551,7 +581,8 @@ class RelatedField(ApiField):
         else:
             # We've got a bare class name here, which won't work (No AppCache
             # to rely on). Try to throw a useful error.
-            raise ImportError("Tastypie requires a Python-style path (<module.module.Class>) to lazy load related resources. Only given '%s'." % self.to)
+            raise ImportError(
+                "Tastypie requires a Python-style path (<module.module.Class>) to lazy load related resources. Only given '%s'." % self.to)
 
         self._to_class = getattr(module, class_name, None)
 
@@ -584,7 +615,7 @@ class RelatedField(ApiField):
         Given a URI is provided, the related resource is attempted to be
         loaded based on the identifiers in the URI.
         """
-        err_msg = "Could not find the provided %s object via resource URI '%s'." % (fk_resource._meta.resource_name, uri,)
+        err_msg = f"Could not find the provided {fk_resource._meta.resource_name}"
 
         if not uri:
             raise ApiFieldError(err_msg)
@@ -609,11 +640,11 @@ class RelatedField(ApiField):
         obj = None
         if getattr(fk_resource._meta, 'include_resource_uri', True) and 'resource_uri' in data:
             uri = data['resource_uri']
-            err_msg = "Could not find the provided %s object via resource URI '%s'." % (fk_resource._meta.resource_name, uri,)
+
             try:
                 obj = fk_resource.get_via_uri(uri, request=request)
             except ObjectDoesNotExist:
-                raise ApiFieldError(err_msg)
+                raise ApiFieldError(f"Could not find the provided {fk_resource._meta.resource_name}")
 
         fk_bundle = fk_resource.build_bundle(
             data=data,
@@ -695,7 +726,9 @@ class RelatedField(ApiField):
             # We've got an object with a primary key.
             return self.resource_from_pk(fk_resource, value, **kwargs)
         else:
-            raise ApiFieldError("The '%s' field was given data that was not a URI, not a dictionary-alike and does not have a 'pk' attribute: %s." % (self.instance_name, value))
+            raise ApiFieldError(
+                "The '%s' field was given data that was not a URI, not a dictionary-alike and does not have a 'pk' attribute: %s." % (
+                    self.instance_name, value))
 
     def should_full_dehydrate(self, bundle, for_list):
         """
@@ -769,7 +802,8 @@ class ToOneField(RelatedField):
                 if callable(self.attribute):
                     raise ApiFieldError("The related resource for resource %s could not be found." % (previous_obj))
                 else:
-                    raise ApiFieldError("The model '%r' has an empty attribute '%s' and doesn't allow a null value." % (previous_obj, attr))
+                    raise ApiFieldError("The model '%r' has an empty attribute '%s' and doesn't allow a null value." % (
+                        previous_obj, attr))
             return None
 
         fk_resource = self.get_related_resource(foreign_obj)
@@ -827,7 +861,8 @@ class ToManyField(RelatedField):
     def dehydrate(self, bundle, for_list=True):
         if not bundle.obj or not bundle.obj.pk:
             if not self.null:
-                raise ApiFieldError("The model '%r' does not have a primary key and can not be used in a ToMany context." % bundle.obj)
+                raise ApiFieldError(
+                    "The model '%r' does not have a primary key and can not be used in a ToMany context." % bundle.obj)
 
             return []
 
@@ -852,7 +887,8 @@ class ToManyField(RelatedField):
 
         if the_m2ms is None:
             if not self.null:
-                raise ApiFieldError("The model '%r' has an empty attribute '%s' and doesn't allow a null value." % (previous_obj, attr))
+                raise ApiFieldError(
+                    "The model '%r' has an empty attribute '%s' and doesn't allow a null value." % (previous_obj, attr))
             return []
 
         if isinstance(the_m2ms, models.Manager):
