@@ -34,6 +34,8 @@ from django.http import HttpResponse, HttpResponseNotFound, Http404
 from django.utils.cache import patch_cache_control, patch_vary_headers
 from django.utils.html import escape
 from django.views.decorators.csrf import csrf_exempt
+from django.db import DataError
+import re
 
 from tastypie.authentication import Authentication
 from tastypie.authorization import ReadOnlyAuthorization
@@ -2528,7 +2530,18 @@ class BaseModelResource(Resource):
         obj_id = self.create_identifier(bundle.obj)
 
         if obj_id not in bundle.objects_saved or bundle.obj._state.adding:
-            bundle.obj.save()
+            try:
+                bundle.obj.save()
+            except DataError as e:
+                arg_str = str(e.args[1]) if e.args and len(e.args) >= 2 else ""
+                pattern = r"Data too long for column '(\w+)'"
+                match = re.search(pattern, arg_str)
+                if match:
+                    column = match.group(1)
+                    new_msg = f"Text too long for '{column}'. Please shorten the input and try again."
+                    raise ImmediateHttpResponse(response=http.HttpBadRequest(new_msg))
+                else:
+                    raise e
             obj_id = self.create_identifier(bundle.obj)
             bundle.objects_saved.add(obj_id)
 
