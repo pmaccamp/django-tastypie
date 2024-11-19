@@ -2286,7 +2286,10 @@ class BaseModelResource(Resource):
             order_by_args.append(
                 "%s%s" % (order, LOOKUP_SEP.join([self.fields[field_name].attribute] + order_by_bits[1:])))
 
-        return obj_list.order_by(*order_by_args)
+        if obj_list:
+            return obj_list.order_by(*order_by_args)
+        else:
+            return obj_list
 
     def apply_filters(self, request, applicable_filters):
         """
