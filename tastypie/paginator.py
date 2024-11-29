@@ -192,7 +192,6 @@ class Paginator(object):
         meta = {
             'offset': offset,
             'limit': limit,
-            'total_count': count,
         }
 
         if limit:
