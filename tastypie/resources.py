@@ -1829,7 +1829,7 @@ class Resource(metaclass=DeclarativeMetaclass):
             # If the key is a property of the object, lets add it to the list, except:
             if hasattr(bundle.obj, key):
                 # Can't update_fields an m2m field, so instead add it to patch_m2m_fields
-                if getattr(self.fields[key], 'is_m2m', False):
+                if key in self.fields and getattr(self.fields[key], 'is_m2m', False):
                     bundle.m2m_update_fields.append(key)
                     continue
                 # Don't add if it is the id/pk field, can't patch that.
