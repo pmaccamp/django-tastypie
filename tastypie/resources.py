@@ -2548,10 +2548,7 @@ class BaseModelResource(Resource):
 
         if obj_id not in bundle.objects_saved or bundle.obj._state.adding:
             try:
-                if hasattr(bundle, 'update_fields'):
-                    bundle.obj.save(update_fields=bundle.update_fields)
-                else:
-                    bundle.obj.save()
+                bundle.obj.save()
             except DataError as e:
                 arg_str = str(e.args[1]) if e.args and len(e.args) >= 2 else ""
                 pattern = r"Data too long for column '(\w+)'"
